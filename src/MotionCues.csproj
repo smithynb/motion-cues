@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <!-- 10.0.19041 gives the C#/WinRT projection of Windows.Devices.Sensors (Accelerometer). -->
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <SupportedOSPlatformVersion>10.0.17763.0</SupportedOSPlatformVersion>
+    <!-- Allows building from Linux/macOS. -->
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWPF>true</UseWPF>
+    <!-- Only for the tray icon (NotifyIcon). -->
+    <UseWindowsForms>true</UseWindowsForms>
+    <!-- Implicit usings would import both System.Windows and System.Windows.Forms and create ambiguities. -->
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- WFAC010 is a WinForms-only hint; this is a WPF app and the manifest DPI setting is what WPF needs. -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+    <RootNamespace>MotionCues</RootNamespace>
+    <AssemblyName>MotionCues</AssemblyName>
+    <Version>1.0.0</Version>
+    <Authors>smithynb</Authors>
+    <RepositoryUrl>https://github.com/smithynb/motion-cues</RepositoryUrl>
+    <Product>Motion Cues</Product>
+    <Description>Vehicle-motion-cue dots overlay to reduce car sickness.</Description>
+
+    <!-- Single-file publish: WPF has native DLLs that must be bundled too. -->
+    <RuntimeIdentifiers>win-x64;win-arm64</RuntimeIdentifiers>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>embedded</DebugType>
+  </PropertyGroup>
+
+</Project>
