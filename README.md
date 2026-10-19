@@ -6,6 +6,8 @@
 
 <p align="center"><a href="https://github.com/smithynb/motion-cues/releases/latest"><b>Download the latest release</b></a></p>
 
+<p align="center"><a href="https://github.com/smithynb/motion-cues/actions/workflows/build.yml"><img src="https://github.com/smithynb/motion-cues/actions/workflows/build.yml/badge.svg" alt="Build status"></a></p>
+
 ---
 
 Car sickness comes from a mismatch: your inner ear feels the car turn and brake, while your eyes see a still screen. Motion Cues draws two columns of dots near the left and right edges of the screen and moves them against the car's acceleration, using the laptop's built-in accelerometer. Your eyes then see the motion your body feels.
@@ -123,6 +125,15 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:PublishSingleFile=
 ```
 
 Use `-r win-arm64` for ARM. The output is a single `MotionCues.exe`. The project uses no third-party NuGet packages.
+
+### Releasing
+
+GitHub Actions builds both exes on every push. Pushing a version tag also publishes them as a release:
+
+```
+git tag v1.0.1
+git push origin v1.0.1
+```
 
 ## License
 
