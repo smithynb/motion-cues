@@ -46,7 +46,8 @@ namespace MotionCues
         public double EdgeMargin { get; set; } = 70;
         /// <summary>Width of the horizontal band a column may wrap within, DIP.</summary>
         public double BandWidth { get; set; } = 140;
-        public double DotOpacity { get; set; } = 0.55;
+        /// <summary>Below 1 the inverse-colour dots blend with the screen and drift toward grey.</summary>
+        public double DotOpacity { get; set; } = 1.0;
 
         // ---- signal processing ----
         public int ReportIntervalMs { get; set; } = 16;

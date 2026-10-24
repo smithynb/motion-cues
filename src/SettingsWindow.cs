@@ -88,7 +88,7 @@ namespace MotionCues
                 s => s.DotsPerSide, (s, v) => s.DotsPerSide = (int)Math.Round(v), v => $"{v:0}", layout: true);
             AddSlider(p, "Dot size", null, 6, 40, 1,
                 s => s.DotDiameter, (s, v) => s.DotDiameter = v, v => $"{v:0} px", layout: true);
-            AddSlider(p, "Opacity", null, 0.1, 1, 0.05,
+            AddSlider(p, "Opacity", "Lower values blend the dots toward grey.", 0.1, 1, 0.05,
                 s => s.DotOpacity, (s, v) => s.DotOpacity = v, v => $"{v * 100:0}%");
             AddSlider(p, "Distance from screen edge", null, 20, 300, 5,
                 s => s.EdgeMargin, (s, v) => s.EdgeMargin = v, v => $"{v:0} px", layout: true);

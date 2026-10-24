@@ -185,7 +185,8 @@ namespace MotionCues
                 $"lin  X {d.LinX,7:+0.000;-0.000}  Y {d.LinY,7:+0.000;-0.000}  Z {d.LinZ,7:+0.000;-0.000}\n" +
                 $"out  lat {d.Lateral,7:+0.000;-0.000}  lon {d.Longitudinal,7:+0.000;-0.000} g\n" +
                 $"var  {d.Variance:0.00000} g²  (thr {_settings.AutoVarianceThreshold:0.00000})  {auto}\n" +
-                $"sens {_settings.Sensitivity}  invX {_settings.InvertX}  invZ {_settings.InvertZ}  flow {_settings.FlowMode}";
+                $"sens {_settings.Sensitivity}  invX {_settings.InvertX}  invZ {_settings.InvertZ}  flow {_settings.FlowMode}\n" +
+                $"dots opacity {_settings.DotOpacity:0.00}  inverse colour {(_overlay?.ColorSampling == true ? "on" : "OFF (capture exclusion failed)")}";
         }
 
         // ================================================================== actions

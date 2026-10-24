@@ -3,9 +3,12 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using Forms = System.Windows.Forms;
+using ImageLockMode = System.Drawing.Imaging.ImageLockMode;
+using PixelFormat = System.Drawing.Imaging.PixelFormat;
 
 namespace MotionCues
 {
@@ -16,6 +19,10 @@ namespace MotionCues
     /// Motion model: a damped spring chases the target offset (gain * acceleration), and each dot is
     /// drawn at base + offset, wrapped inside its column band, so large offsets read as continuous
     /// scrolling rather than dots jumping back. Dots fade out near the wrap edges to hide the seam.
+    ///
+    /// Look: the window is excluded from screen capture, so the screen under each column is grabbed
+    /// (inverted during the blit) many times a second, and each dot shows its slice of that image:
+    /// whatever is behind a dot shows through it with inverted colours.
     /// </summary>
     public sealed class OverlayWindow : Window
     {
@@ -26,9 +33,20 @@ namespace MotionCues
         private readonly TextBlock _debugText;
         private readonly Border _debugBorder;
         private Ellipse[] _dots = Array.Empty<Ellipse>();
+        private ImageBrush[] _brushes = Array.Empty<ImageBrush>();
         private IntPtr _hwnd;
         private HwndSource? _source;
         private readonly DispatcherTimer _topmostTimer;
+
+        // screen capture, one inverted strip per column
+        private const double CaptureInterval = 1.0 / 30;
+        private bool _canSample;
+        private double _captureClock;
+        private double _dpiScale = 1;
+        private System.Drawing.Point _screenOrigin;
+        private readonly System.Drawing.Bitmap?[] _strips = new System.Drawing.Bitmap?[2];
+        private readonly WriteableBitmap?[] _inverted = new WriteableBitmap?[2];
+        private readonly double[] _stripLeft = new double[2]; // DIP
 
         // spring state (DIP)
         private double _px, _py, _vx, _vy;
@@ -37,6 +55,8 @@ namespace MotionCues
         public double TargetX { get; set; }
         public double TargetY { get; set; }
         public bool DotsVisible { get; set; } = true;
+        /// <summary>True when dots show the inverted screen behind them (false = fixed grey fallback).</summary>
+        public bool ColorSampling => _canSample;
 
         private Settings _settings;
 
@@ -110,6 +130,9 @@ namespace MotionCues
             ex &= ~(long)NativeMethods.WS_EX_APPWINDOW;
             NativeMethods.SetWindowLong(_hwnd, NativeMethods.GWL_EXSTYLE, ex);
 
+            // Without capture exclusion the samples would include our own dots and feed back on themselves.
+            _canSample = NativeMethods.SetWindowDisplayAffinity(_hwnd, NativeMethods.WDA_EXCLUDEFROMCAPTURE);
+
             _source = HwndSource.FromHwnd(_hwnd);
             _source?.AddHook(WndProc);
 
@@ -131,6 +154,7 @@ namespace MotionCues
         {
             if (_hwnd == IntPtr.Zero) return;
             var b = Forms.Screen.PrimaryScreen?.Bounds ?? new System.Drawing.Rectangle(0, 0, 1920, 1080);
+            _screenOrigin = b.Location;
             NativeMethods.SetWindowPos(_hwnd, NativeMethods.HWND_TOPMOST, b.X, b.Y, b.Width, b.Height,
                 NativeMethods.SWP_NOACTIVATE | NativeMethods.SWP_SHOWWINDOW);
         }
@@ -159,6 +183,7 @@ namespace MotionCues
         protected override void OnClosed(EventArgs e)
         {
             _topmostTimer.Stop();
+            foreach (var bmp in _strips) bmp?.Dispose();
             Microsoft.Win32.SystemEvents.DisplaySettingsChanged -= OnDisplaySettingsChanged;
             if (_hwnd != IntPtr.Zero) NativeMethods.UnregisterHotKey(_hwnd, HotkeyId);
             _source?.RemoveHook(WndProc);
@@ -173,19 +198,27 @@ namespace MotionCues
             int n = _settings.DotsPerSide;
             double d = _settings.DotDiameter;
 
-            // Semi-transparent dark fill + light outline: visible on both light and dark content.
+            // Fallback when the screen can't be captured: dark fill + light outline, visible on most content.
             var fill = new SolidColorBrush(Color.FromArgb(200, 40, 40, 40)); fill.Freeze();
             var stroke = new SolidColorBrush(Color.FromArgb(220, 245, 245, 245)); stroke.Freeze();
+            // Crisp 1:1 pixels instead of a blurred resample when dots sit between device pixels.
+            RenderOptions.SetBitmapScalingMode(_canvas, BitmapScalingMode.NearestNeighbor);
 
             _dots = new Ellipse[n * 2];
+            _brushes = new ImageBrush[n * 2];
             for (int i = 0; i < _dots.Length; i++)
             {
+                _brushes[i] = new ImageBrush(_inverted[i / n])
+                {
+                    ViewboxUnits = BrushMappingMode.Absolute,
+                    Stretch = Stretch.Fill,
+                };
                 var el = new Ellipse
                 {
                     Width = d,
                     Height = d,
-                    Fill = fill,
-                    Stroke = stroke,
+                    Fill = _canSample ? _brushes[i] : fill,
+                    Stroke = _canSample ? null : stroke,
                     StrokeThickness = Math.Max(1.0, d / 9.0),
                     IsHitTestVisible = false,
                     Effect = null,
@@ -193,6 +226,7 @@ namespace MotionCues
                 _dots[i] = el;
                 _canvas.Children.Add(el);
             }
+            _captureClock = CaptureInterval; // capture on the next frame
             UpdateDotPositions();
         }
 
@@ -225,7 +259,11 @@ namespace MotionCues
             _canvas.Opacity = _layerOpacity * _settings.DotOpacity;
             _canvas.Visibility = _layerOpacity <= 0 ? Visibility.Hidden : Visibility.Visible;
 
-            if (_layerOpacity > 0) UpdateDotPositions();
+            if (_layerOpacity > 0)
+            {
+                if (_canSample) CaptureIfDue(dt);
+                UpdateDotPositions();
+            }
         }
 
         /// <summary>True when the dot layer has fully faded out (render loop can idle).</summary>
@@ -264,6 +302,8 @@ namespace MotionCues
                     double a = Math.Clamp(Math.Min(ax, ay), 0, 1);
 
                     var el = _dots[side * n + i];
+                    // Show the part of the inverted strip that lies under the dot.
+                    _brushes[side * n + i].Viewbox = new Rect(x - d / 2 - _stripLeft[side], y - d / 2, d, d);
                     Canvas.SetLeft(el, x - d / 2);
                     Canvas.SetTop(el, y - d / 2);
                     el.Opacity = a;
@@ -272,6 +312,66 @@ namespace MotionCues
         }
 
         private static double Mod(double a, double m) => ((a % m) + m) % m;
+
+        // ------------------------------------------------------------------ screen capture
+
+        private void CaptureIfDue(double dt)
+        {
+            _captureClock += dt;
+            if (_captureClock < CaptureInterval) return;
+            _captureClock = 0;
+            try { CaptureStrips(); }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine("Screen capture failed: " + ex.Message); }
+        }
+
+        /// <summary>
+        /// Grab each column's band from the screen (physical pixels), inverted by the blit itself
+        /// (NOTSRCCOPY), and copy it into the bitmap the dots' brushes read from.
+        /// </summary>
+        private void CaptureStrips()
+        {
+            double W = ActualWidth, H = ActualHeight;
+            if (W <= 0 || H <= 0 || _dots.Length == 0) return;
+            _dpiScale = PresentationSource.FromVisual(this)?.CompositionTarget.TransformToDevice.M11 ?? 1;
+
+            int n = _settings.DotsPerSide;
+            double d = _settings.DotDiameter;
+            double band = Math.Min(_settings.BandWidth, W / 3);
+            // The band plus half a dot either side, so a dot at the band edge is still covered.
+            int stripW = (int)Math.Ceiling((band + d) * _dpiScale) + 2;
+            int stripH = (int)Math.Ceiling(H * _dpiScale);
+
+            for (int side = 0; side < 2; side++)
+            {
+                double cx = side == 0 ? _settings.EdgeMargin : W - _settings.EdgeMargin;
+                int left = (int)Math.Floor((cx - band / 2 - d / 2) * _dpiScale) - 1;
+                _stripLeft[side] = left / _dpiScale;
+
+                var bmp = _strips[side];
+                if (bmp == null || bmp.Width != stripW || bmp.Height != stripH)
+                {
+                    bmp?.Dispose();
+                    bmp = _strips[side] = new System.Drawing.Bitmap(stripW, stripH, PixelFormat.Format32bppRgb);
+                }
+                using (var g = System.Drawing.Graphics.FromImage(bmp))
+                    g.CopyFromScreen(_screenOrigin.X + left, _screenOrigin.Y, 0, 0, bmp.Size,
+                        System.Drawing.CopyPixelOperation.NotSourceCopy);
+
+                var wb = _inverted[side];
+                if (wb == null || wb.PixelWidth != stripW || wb.PixelHeight != stripH)
+                {
+                    // DPI matches the screen so one bitmap pixel is one device pixel and Viewbox is in DIPs.
+                    wb = _inverted[side] = new WriteableBitmap(stripW, stripH, 96 * _dpiScale, 96 * _dpiScale,
+                        PixelFormats.Bgr32, null);
+                    for (int i = 0; i < n; i++) _brushes[side * n + i].ImageSource = wb;
+                }
+
+                var data = bmp.LockBits(new System.Drawing.Rectangle(0, 0, stripW, stripH),
+                    ImageLockMode.ReadOnly, PixelFormat.Format32bppRgb);
+                try { wb.WritePixels(new Int32Rect(0, 0, stripW, stripH), data.Scan0, data.Stride * stripH, data.Stride); }
+                finally { bmp.UnlockBits(data); }
+            }
+        }
 
         // ------------------------------------------------------------------ debug readout
 
