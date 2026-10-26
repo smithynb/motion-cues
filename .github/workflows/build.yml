@@ -41,9 +41,11 @@ jobs:
               --self-contained true -p:PublishSingleFile=true \
               -p:Version=${{ steps.version.outputs.value }} \
               -o "dist/$rid"
-            cp "dist/$rid/MotionCues.exe" "release/MotionCues-$rid.exe"
+            # Zipped: the exe is stored uncompressed (it uses less memory that way), so a zip
+            # cuts the download from ~180 MB to ~70 MB. Windows opens zips without extra tools.
+            (cd "dist/$rid" && zip -9 -q "../../release/MotionCues-$rid.zip" MotionCues.exe)
           done
-          cd release && sha256sum *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt
+          cd release && sha256sum *.zip > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       - uses: actions/upload-artifact@v7
         with:

@@ -19,10 +19,10 @@ The overlay is click-through and stays on top, so you can keep working normally.
 
 ## Download and run
 
-1. Open the [latest release](https://github.com/smithynb/motion-cues/releases/latest) and download the exe for your laptop:
-   - `MotionCues-win-x64.exe` for Intel and AMD laptops (most laptops).
-   - `MotionCues-win-arm64.exe` for Snapdragon / ARM laptops.
-2. Double-click it. Nothing to install, and you don't need .NET.
+1. Open the [latest release](https://github.com/smithynb/motion-cues/releases/latest) and download the zip for your laptop:
+   - `MotionCues-win-x64.zip` for Intel and AMD laptops (most laptops).
+   - `MotionCues-win-arm64.zip` for Snapdragon / ARM laptops.
+2. Unzip it and double-click `MotionCues.exe`. Nothing to install, and you don't need .NET.
 3. Windows may show "Windows protected your PC" because the exe isn't code-signed. Click **More info**, then **Run anyway**.
 
 The app lives in the system tray. If you don't see the icon, check the tray overflow (^). The dots appear right away. **Ctrl+Alt+M** shows and hides them.
@@ -135,7 +135,7 @@ Use `-r win-arm64` for ARM. The output is a single `MotionCues.exe`. The project
 
 ### Releasing
 
-GitHub Actions builds both exes on every push. Pushing a version tag also publishes them as a release:
+GitHub Actions builds both exes on every push. Pushing a version tag also publishes them as a release, each zipped:
 
 ```
 git tag v1.0.1
