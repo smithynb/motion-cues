@@ -34,19 +34,31 @@ namespace MotionCues
         private DemoSource? _demo;
         private DemoWindow? _demoWindow;
         private SettingsWindow? _settingsWindow;
-        private OverlayWindow? _overlay;
+        private Overlay? _overlay;
+        private ScreenDimmer? _dimmer;
         private Forms.NotifyIcon? _tray;
         private Icon? _trayIcon;
         private IntPtr _trayHIcon;
 
         // menu items whose check state we update
-        private Forms.ToolStripMenuItem? _miShow, _miInvX, _miInvZ, _miDebug, _miAuto, _miDemo, _miFlow;
+        private Forms.ToolStripMenuItem? _miShow, _miInvX, _miInvZ, _miDebug, _miAuto, _miDemo, _miFlow, _miDim;
         private Forms.ToolStripMenuItem? _miLow, _miMed, _miHigh;
 
         private readonly Stopwatch _clock = Stopwatch.StartNew();
         private double _lastFrame;
         private double _lastDebug;
+        // frame rate over the last second, for the debug readout and MOTIONCUES_PERFLOG
+        private int _frames;
+        private double _fpsStart, _fps;
+        private readonly string? _perfLog = Environment.GetEnvironmentVariable("MOTIONCUES_PERFLOG");
         private bool _renderHooked;
+        // Frame interval in ms. VsyncMs means every display frame (CompositionTarget.Rendering);
+        // anything longer runs on a timer, so slow or still dots cost fewer frames.
+        private const int VsyncMs = 16;
+        private int _frameMs = VsyncMs;
+        private readonly DispatcherTimer _slowTick = new();
+        private bool _slowRunning;
+        private double _slowerFor;
         private double _flowX;
 
         protected override void OnStartup(StartupEventArgs e)
@@ -58,16 +70,20 @@ namespace MotionCues
                 ex.Handled = true; // an overlay should never take the user's session down with it
             };
 
+            _slowTick.Tick += (_, _) => Frame();
+
             _settings = Settings.Load();
             _settings.ApplyTo(_proc);
             AutoStart.RefreshPath();
             _auto.CalmSeconds = _settings.AutoCalmSeconds;
 
-            _overlay = new OverlayWindow(_settings);
+            _dimmer = new ScreenDimmer();
+            _overlay = new Overlay(_settings);
             _overlay.HotkeyPressed += ToggleDots;
             _overlay.Show();
             _overlay.ApplySettings(_settings);
             _overlay.SetDebugVisible(_settings.ShowDebug);
+            _dimmer.Apply(_settings.DimMode, _settings.DimAmount);
 
             CreateTray();
 
@@ -93,11 +109,16 @@ namespace MotionCues
 
             if (Array.Exists(e.Args, a => a.Equals("--settings", StringComparison.OrdinalIgnoreCase)))
                 OpenSettings();
+            if (Array.Exists(e.Args, a => a.Equals("--demo", StringComparison.OrdinalIgnoreCase)))
+                SetDemo(true);
         }
 
         protected override void OnExit(ExitEventArgs e)
         {
             CompositionTarget.Rendering -= OnRendering;
+            _slowTick.Stop();
+            _overlay?.Close();
+            _dimmer?.Dispose();
             _sensor?.Dispose();
             if (_tray != null) { _tray.Visible = false; _tray.Dispose(); }
             _trayIcon?.Dispose();
@@ -112,27 +133,34 @@ namespace MotionCues
         private bool WantDots => _settings.ShowDots && (!_settings.AutoMode || _auto.Active || _demo != null);
 
         /// <summary>
-        /// Hook CompositionTarget.Rendering only while something animates, so the app costs ~nothing
-        /// when dots are hidden. In auto mode we keep a cheap timer-free check inside the frame loop,
-        /// so the hook stays on while auto mode is armed.
+        /// Run the frame loop only while something can change, so the app costs ~nothing when dots are
+        /// hidden. Fast motion runs on every display frame (CompositionTarget.Rendering); slower motion and
+        /// still dots run on a timer at a lower rate (see <see cref="FrameMsFor"/>). In auto mode the loop
+        /// stays on while auto mode is armed.
         /// </summary>
         private void UpdateRenderHook()
         {
             bool need = _settings.ShowDots || _settings.ShowDebug || _demo != null || !(_overlay?.IsIdle ?? true);
-            if (need && !_renderHooked)
-            {
+            bool fast = need && _frameMs <= VsyncMs, slow = need && _frameMs > VsyncMs;
+            _slowTick.Interval = TimeSpan.FromMilliseconds(Math.Max(_frameMs, VsyncMs));
+            if (!_renderHooked && !_slowRunning && (fast || slow))
                 _lastFrame = _clock.Elapsed.TotalSeconds;
-                CompositionTarget.Rendering += OnRendering;
-                _renderHooked = true;
-            }
-            else if (!need && _renderHooked)
+            if (fast != _renderHooked)
             {
-                CompositionTarget.Rendering -= OnRendering;
-                _renderHooked = false;
+                if (fast) CompositionTarget.Rendering += OnRendering;
+                else CompositionTarget.Rendering -= OnRendering;
+                _renderHooked = fast;
+            }
+            if (slow != _slowRunning)
+            {
+                if (slow) _slowTick.Start(); else _slowTick.Stop();
+                _slowRunning = slow;
             }
         }
 
-        private void OnRendering(object? sender, EventArgs e)
+        private void OnRendering(object? sender, EventArgs e) => Frame();
+
+        private void Frame()
         {
             if (_overlay == null) return;
             double now = _clock.Elapsed.TotalSeconds;
@@ -140,6 +168,7 @@ namespace MotionCues
             _lastFrame = now;
 
             _demo?.Tick();
+            CountFrame(now);
 
             if (_settings.AutoMode)
                 _auto.Update(_proc.GetVariance(), _settings.AutoVarianceThreshold, dt);
@@ -160,6 +189,8 @@ namespace MotionCues
                 _overlay.TargetX = _settings.TurnGain * scale * lat * signX;
             }
             _overlay.TargetY = _settings.VerticalGain * scale * lon * (_settings.InvertZ ? -1 : 1);
+            _overlay.MotionX = scale * lat * signX;
+            _overlay.MotionY = scale * lon * (_settings.InvertZ ? -1 : 1);
             _overlay.DotsVisible = WantDots;
             _overlay.Step(dt);
 
@@ -169,8 +200,40 @@ namespace MotionCues
                 _overlay.SetDebugText(BuildDebugText());
             }
 
+            // Speed up at once; slow down only after the lower rate has been enough for half a second.
+            int want = FrameMsFor(_overlay.ScreenSpeed, _overlay.IsSettled);
+            _slowerFor = want > _frameMs ? _slowerFor + dt : 0;
+            if (want < _frameMs || _slowerFor > 0.5)
+            {
+                _slowerFor = 0;
+                if (want != _frameMs) { _frameMs = want; UpdateRenderHook(); }
+            }
+
             if (_overlay.IsIdle && !_settings.ShowDebug && !_settings.AutoMode && _demo == null)
                 UpdateRenderHook();
+        }
+
+        /// <summary>
+        /// Frame interval for the fastest on-screen motion: keep each step at about 2 DIP so motion stays
+        /// smooth, and only use every display frame when that is needed.
+        /// </summary>
+        private static int FrameMsFor(double speed, bool settled) =>
+            settled ? 100 : speed >= 120 ? VsyncMs : speed >= 60 ? 33 : speed >= 40 ? 50 : 66;
+
+        private void CountFrame(double now)
+        {
+            _frames++;
+            if (now - _fpsStart < 1) return;
+            _fps = _frames / (now - _fpsStart);
+            _frames = 0;
+            _fpsStart = now;
+            if (_perfLog == null) return;
+            try
+            {
+                System.IO.File.AppendAllText(_perfLog,
+                    $"{DateTime.Now:HH:mm:ss} fps {_fps:0.0} capture {_overlay?.CaptureMs ?? 0:0.00} ms particles {_overlay?.ParticleCount ?? 0} frame {_frameMs} ms speed {_overlay?.ScreenSpeed ?? 0:0} settled {_overlay?.IsSettled} motion {_overlay?.MotionX:+0.000;-0.000} {_overlay?.MotionY:+0.000;-0.000} strength {_overlay?.FountainIntensity:0.00}\n");
+            }
+            catch (System.IO.IOException) { }
         }
 
         private string BuildDebugText()
@@ -179,14 +242,15 @@ namespace MotionCues
             string src = _demo != null ? "DEMO" : _sensor != null ? $"sensor {_sensor.ActualReportInterval} ms (~{d.RateHz:0} Hz)" : "no sensor";
             string auto = _settings.AutoMode ? (_auto.Active ? "auto: ACTIVE" : "auto: calm") : "auto: off";
             return
-                $"src  {src}\n" +
+                $"src  {src}   fps {_fps:0}\n" +
                 $"raw  X {d.RawX,7:+0.000;-0.000}  Y {d.RawY,7:+0.000;-0.000}  Z {d.RawZ,7:+0.000;-0.000}\n" +
                 $"grav X {d.GravX,7:+0.000;-0.000}  Y {d.GravY,7:+0.000;-0.000}  Z {d.GravZ,7:+0.000;-0.000}\n" +
                 $"lin  X {d.LinX,7:+0.000;-0.000}  Y {d.LinY,7:+0.000;-0.000}  Z {d.LinZ,7:+0.000;-0.000}\n" +
                 $"out  lat {d.Lateral,7:+0.000;-0.000}  lon {d.Longitudinal,7:+0.000;-0.000} g\n" +
                 $"var  {d.Variance:0.00000} g²  (thr {_settings.AutoVarianceThreshold:0.00000})  {auto}\n" +
                 $"sens {_settings.Sensitivity}  invX {_settings.InvertX}  invZ {_settings.InvertZ}  flow {_settings.FlowMode}\n" +
-                $"dots opacity {_settings.DotOpacity:0.00}  inverse colour {(_overlay?.ColorSampling == true ? "on" : "OFF (capture exclusion failed)")}";
+                $"dots opacity {_settings.DotOpacity:0.00}  inverse colour {(_overlay?.ColorSampling == true ? "on" : "OFF (capture exclusion failed)")}  capture {_overlay?.CaptureMs ?? 0:0.0} ms\n" +
+                $"fountain {(_settings.FountainEnabled ? "on" : "off")}  strength {_overlay?.FountainIntensity ?? 0:0.00}  particles {_overlay?.ParticleCount ?? 0}  dim {(_settings.DimMode ? $"{_settings.DimAmount * 100:0}% (table x{_dimmer?.GammaFactor:0.00}, colour x{_dimmer?.MatrixFactor:0.00})" : "off")}";
         }
 
         // ================================================================== actions
@@ -209,6 +273,8 @@ namespace MotionCues
             }
             _settings.ApplyTo(_proc);
             _overlay?.SetDebugVisible(_settings.ShowDebug);
+            _overlay?.SettingsChanged();
+            _dimmer?.Apply(_settings.DimMode, _settings.DimAmount);
             UpdateMenuChecks();
             UpdateRenderHook();
         }
@@ -302,6 +368,8 @@ namespace MotionCues
             _miFlow = new Forms.ToolStripMenuItem("Flow mode (scroll through turns)", null, (_, _) => SetFlow(!_settings.FlowMode, fromSettingsWindow: false));
             _miInvZ = new Forms.ToolStripMenuItem("Invert Z (accelerate/brake)", null, (_, _) => { _settings.InvertZ = !_settings.InvertZ; Changed(); });
 
+            _miDim = new Forms.ToolStripMenuItem("Dim mode (darken the screen)", null, (_, _) => { _settings.DimMode = !_settings.DimMode; Changed(); });
+
             var sens = new Forms.ToolStripMenuItem("Sensitivity");
             _miLow = new Forms.ToolStripMenuItem("Low", null, (_, _) => { _settings.Sensitivity = Sensitivity.Low; Changed(); });
             _miMed = new Forms.ToolStripMenuItem("Medium", null, (_, _) => { _settings.Sensitivity = Sensitivity.Medium; Changed(); });
@@ -338,7 +406,7 @@ namespace MotionCues
 
             menu.Items.AddRange(new Forms.ToolStripItem[]
             {
-                openSettingsWindow, _miShow, new Forms.ToolStripSeparator(),
+                openSettingsWindow, _miShow, _miDim, new Forms.ToolStripSeparator(),
                 _miInvX, _miInvZ, _miFlow, sens, cal, new Forms.ToolStripSeparator(),
                 _miAuto, _miDebug, _miDemo, new Forms.ToolStripSeparator(),
                 openSettings, reload, new Forms.ToolStripSeparator(),
@@ -363,6 +431,7 @@ namespace MotionCues
             _miInvX!.Checked = _settings.InvertX;
             _miInvZ!.Checked = _settings.InvertZ;
             _miFlow!.Checked = _settings.FlowMode;
+            _miDim!.Checked = _settings.DimMode;
             _miLow!.Checked = _settings.Sensitivity == Sensitivity.Low;
             _miMed!.Checked = _settings.Sensitivity == Sensitivity.Medium;
             _miHigh!.Checked = _settings.Sensitivity == Sensitivity.High;

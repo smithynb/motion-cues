@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace MotionCues
 {
-    /// <summary>Win32 interop used by the overlay (click-through styles, topmost, hotkey).</summary>
+    /// <summary>Win32 interop: overlay windows (click-through, topmost, hotkey), screen capture and dim mode.</summary>
     internal static class NativeMethods
     {
         public const int GWL_EXSTYLE = -20;
@@ -66,5 +66,61 @@ namespace MotionCues
         [DllImport("user32.dll", SetLastError = true)]
         [return: MarshalAs(UnmanagedType.Bool)]
         public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, uint dwAffinity);
+
+        // ---- screen capture into a DIB (CaptureWorker)
+
+        public const uint NOTSRCCOPY = 0x00330008; // copy and invert in one blit
+        public const uint DIB_RGB_COLORS = 0;
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct BITMAPINFOHEADER
+        {
+            public uint biSize;
+            public int biWidth, biHeight;
+            public ushort biPlanes, biBitCount;
+            public uint biCompression, biSizeImage;
+            public int biXPelsPerMeter, biYPelsPerMeter;
+            public uint biClrUsed, biClrImportant;
+        }
+
+        [DllImport("user32.dll")] public static extern IntPtr GetDC(IntPtr hWnd);
+        [DllImport("user32.dll")] public static extern int ReleaseDC(IntPtr hWnd, IntPtr hDC);
+        [DllImport("gdi32.dll")] public static extern IntPtr CreateCompatibleDC(IntPtr hdc);
+        [DllImport("gdi32.dll", CharSet = CharSet.Unicode)]
+        public static extern IntPtr CreateDC(string? driver, string device, string? output, IntPtr devMode);
+        [DllImport("gdi32.dll")] public static extern bool DeleteDC(IntPtr hdc);
+        [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr hdc, IntPtr obj);
+        [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr obj);
+        [DllImport("gdi32.dll")]
+        public static extern IntPtr CreateDIBSection(IntPtr hdc, ref BITMAPINFOHEADER bmi, uint usage, out IntPtr bits, IntPtr section, uint offset);
+        [DllImport("gdi32.dll")]
+        public static extern bool BitBlt(IntPtr dst, int x, int y, int w, int h, IntPtr src, int sx, int sy, uint rop);
+        [DllImport("gdi32.dll")] public static extern bool GdiFlush();
+
+        // ---- DPI of the primary monitor
+
+        public const int MDT_EFFECTIVE_DPI = 0;
+        public const uint MONITOR_DEFAULTTOPRIMARY = 1;
+
+        [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
+        [DllImport("user32.dll")] public static extern IntPtr MonitorFromPoint(POINT pt, uint flags);
+        [DllImport("shcore.dll")] public static extern int GetDpiForMonitor(IntPtr hmon, int type, out uint dpiX, out uint dpiY);
+
+        // ---- dim mode (ScreenDimmer)
+
+        /// <summary>ramp = 768 values: 256 red, then 256 green, then 256 blue.</summary>
+        [DllImport("gdi32.dll")] public static extern bool GetDeviceGammaRamp(IntPtr hdc, [Out] ushort[] ramp);
+        [DllImport("gdi32.dll")] public static extern bool SetDeviceGammaRamp(IntPtr hdc, [In] ushort[] ramp);
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct MAGCOLOREFFECT
+        {
+            [MarshalAs(UnmanagedType.ByValArray, SizeConst = 25)] public float[] transform;
+        }
+
+        [DllImport("Magnification.dll")] public static extern bool MagInitialize();
+        [DllImport("Magnification.dll")] public static extern bool MagUninitialize();
+        [DllImport("Magnification.dll")] public static extern bool MagSetFullscreenColorEffect(ref MAGCOLOREFFECT effect);
+        [DllImport("Magnification.dll")] public static extern bool MagGetFullscreenColorEffect(ref MAGCOLOREFFECT effect);
     }
 }

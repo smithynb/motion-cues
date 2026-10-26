@@ -49,6 +49,28 @@ namespace MotionCues
         /// <summary>Below 1 the inverse-colour dots blend with the screen and drift toward grey.</summary>
         public double DotOpacity { get; set; } = 1.0;
 
+        // ---- particle fountain ----
+        /// <summary>During steady motion, extra dots of random size stream the way the cue dots move.</summary>
+        public bool FountainEnabled { get; set; } = true;
+        /// <summary>Particles spawned per second per side at full strength.</summary>
+        public double FountainAmount { get; set; } = 40;
+        /// <summary>Average particle speed, DIP per second.</summary>
+        public double FountainSpeed { get; set; } = 220;
+        /// <summary>Steady motion (g, after sensitivity) needed before particles start.</summary>
+        public double FountainStartG { get; set; } = 0.04;
+        /// <summary>How far a particle may veer from the stream direction, degrees either side.</summary>
+        public double FountainSpreadDegrees { get; set; } = 25;
+        /// <summary>Width of the area around each column where particles live, DIP.</summary>
+        public double FountainWidth { get; set; } = 260;
+        public double ParticleSizeMin { get; set; } = 4;
+        public double ParticleSizeMax { get; set; } = 12;
+
+        // ---- dim mode ----
+        /// <summary>Darken the display output itself (gamma table, then colour matrix), past the lowest backlight.</summary>
+        public bool DimMode { get; set; } = false;
+        /// <summary>How much less light the screen gives off: 0 = no change, 0.9 = 90% less.</summary>
+        public double DimAmount { get; set; } = 0.5;
+
         // ---- signal processing ----
         public int ReportIntervalMs { get; set; } = 16;
         public double GravityTauSeconds { get; set; } = 5;
@@ -123,6 +145,14 @@ namespace MotionCues
             BandWidth = Math.Clamp(BandWidth, DotDiameter * 2, 600);
             EdgeMargin = Math.Clamp(EdgeMargin, 0, 600);
             DotOpacity = Math.Clamp(DotOpacity, 0.05, 1);
+            FountainAmount = Math.Clamp(FountainAmount, 0, 300);
+            FountainSpeed = Math.Clamp(FountainSpeed, 0, 2000);
+            FountainStartG = Math.Clamp(FountainStartG, 0, 1);
+            FountainSpreadDegrees = Math.Clamp(FountainSpreadDegrees, 0, 180);
+            FountainWidth = Math.Clamp(FountainWidth, 20, 1000);
+            ParticleSizeMin = Math.Clamp(ParticleSizeMin, 1, 64);
+            ParticleSizeMax = Math.Clamp(ParticleSizeMax, ParticleSizeMin, 64);
+            DimAmount = Math.Clamp(DimAmount, 0, 0.95);
             ReportIntervalMs = Math.Clamp(ReportIntervalMs, 1, 1000);
             GravityTauSeconds = Math.Clamp(GravityTauSeconds, 0.2, 30);
             SmoothTauSeconds = Math.Clamp(SmoothTauSeconds, 0.005, 2);

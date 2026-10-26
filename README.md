@@ -47,7 +47,9 @@ Right-click the tray icon and choose **Settings...**. Every change applies live,
 | Springiness | 0% settles without bouncing. Higher lets the dots overshoot a little. |
 | Jolt filter | Softens sharp bumps before they reach the dots. |
 | Ignore small motion | Motion below this is treated as none. |
-| Dots | Number per side, size, opacity, and distance from the screen edge. |
+| Dots | Number per side, size, opacity, and distance from the screen edge. Each dot shows an inverted view of the screen behind it. |
+| Particle fountain | During a steady turn, speed-up or brake, extra dots of random size stream the way the dots move. Amount, speed, start level, spread, area width and size range are adjustable. Standing still shows only the regular dots. |
+| Dim mode | Darkens the display itself past the lowest brightness setting, cursor and taskbar included. It scales the graphics card's gamma table, like the brightness and contrast sliders in the AMD or NVIDIA control panel, and makes up anything Windows refuses with a full-screen colour filter. Colours keep their hue. If the app crashes while dimmed, the next start restores the screen. |
 | Other | Invert either direction, debug readout, start with Windows. |
 
 The tray menu also has **Calibrate**, which resets the level to the current position. Click it after you adjust the lid, or if the dots creep while the car is stopped or driving straight.
@@ -60,6 +62,7 @@ Settings are stored in `%APPDATA%\MotionCues\settings.json`. A few advanced valu
 |---|---|
 | Settings... | Opens the settings window |
 | Show dots (Ctrl+Alt+M) | Shows or hides the dots. Left-clicking the tray icon does the same. |
+| Dim mode | Darkens the whole screen. Set the amount in Settings. |
 | Invert X / Invert Z | Flips the left/right or speeding up/braking direction |
 | Flow mode | Same as the setting above |
 | Sensitivity | Low, Medium or High |
@@ -69,7 +72,11 @@ Settings are stored in `%APPDATA%\MotionCues\settings.json`. A few advanced valu
 | Demo mode | Drives the dots from a scripted 24 s drive, or from the arrow keys |
 | Open / Reload settings file | Edits the JSON directly |
 
-Run `MotionCues.exe --settings` to start the app with the settings window open.
+Run `MotionCues.exe --settings` to start the app with the settings window open, or `--demo` to start in demo mode.
+
+The dots are hidden from screenshots and screen recordings, because the app reads the screen behind them. Set the environment variable `MOTIONCUES_CAPTURABLE=1` before starting the app to show plain grey dots that screenshots can see. Set `MOTIONCUES_PERFLOG` to a file path to log the frame rate, capture time and particle count once a second.
+
+The app saves battery by drawing only two narrow strips at the screen edges, grabbing the screen on a background thread, and lowering its frame rate when the dots move slowly or stand still (about 10 fps when still, the full display rate during fast motion).
 
 ## Checking the directions in a car
 

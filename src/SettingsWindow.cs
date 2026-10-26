@@ -93,6 +93,34 @@ namespace MotionCues
             AddSlider(p, "Distance from screen edge", null, 20, 300, 5,
                 s => s.EdgeMargin, (s, v) => s.EdgeMargin = v, v => $"{v:0} px", layout: true);
 
+            AddHeader(p, "Particle fountain");
+            AddCheckBox(p, "Particle fountain during steady motion",
+                "In a long turn, speed-up or brake, extra dots of random size stream the way the dots move. " +
+                "Standing still only shows the regular dots.",
+                s => s.FountainEnabled, (s, v) => { s.FountainEnabled = v; _host.Changed(false); });
+            AddSlider(p, "Amount", "How many particles appear each second on each side.",
+                5, 150, 5, s => s.FountainAmount, (s, v) => s.FountainAmount = v, v => $"{v:0} per s");
+            AddSlider(p, "Speed", null,
+                50, 800, 10, s => s.FountainSpeed, (s, v) => s.FountainSpeed = v, v => $"{v:0} px/s");
+            AddSlider(p, "Starts at", "How strong the steady motion must be before particles appear. Raise it for fewer false starts.",
+                0, 0.2, 0.005, s => s.FountainStartG, (s, v) => s.FountainStartG = v, v => $"{v:0.000} g");
+            AddSlider(p, "Spread", "How far particles may veer from the main direction.",
+                0, 90, 5, s => s.FountainSpreadDegrees, (s, v) => s.FountainSpreadDegrees = v, v => $"±{v:0}°");
+            AddSlider(p, "Area width", "Width of the strip around each column where particles fly.",
+                100, 600, 10, s => s.FountainWidth, (s, v) => s.FountainWidth = v, v => $"{v:0} px");
+            AddSlider(p, "Smallest particle", null,
+                2, 40, 1, s => s.ParticleSizeMin, (s, v) => s.ParticleSizeMin = v, v => $"{v:0} px");
+            AddSlider(p, "Largest particle", null,
+                2, 40, 1, s => s.ParticleSizeMax, (s, v) => s.ParticleSizeMax = v, v => $"{v:0} px");
+
+            AddHeader(p, "Screen");
+            AddCheckBox(p, "Dim mode",
+                "Darkens the display itself, cursor and taskbar included, past the lowest brightness setting. " +
+                "Works like the brightness and contrast sliders in the AMD or NVIDIA control panel. Same as the tray menu.",
+                s => s.DimMode, (s, v) => { s.DimMode = v; _host.Changed(false); });
+            AddSlider(p, "Dim amount", "How much less light the screen gives off.",
+                0.1, 0.95, 0.05, s => s.DimAmount, (s, v) => s.DimAmount = v, v => $"{v * 100:0}% darker");
+
             AddHeader(p, "Other");
             AddCheckBox(p, "Invert left/right", null, s => s.InvertX, (s, v) => { s.InvertX = v; _host.Changed(false); });
             AddCheckBox(p, "Invert speeding up/braking", null, s => s.InvertZ, (s, v) => { s.InvertZ = v; _host.Changed(false); });
